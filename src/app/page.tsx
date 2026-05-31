@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import InvitationModal from "@/components/InvitationModal";
 import Hero from "@/components/Hero";
@@ -18,15 +18,45 @@ import QRCheckin from "@/components/QRCheckin";
 import Footer from "@/components/Footer";
 import MusicPlayer from "@/components/MusicPlayer";
 
+function smoothScrollTo(targetY: number, duration = 2000) {
+  const startY = window.scrollY;
+  const diff = targetY - startY;
+  const startTime = performance.now();
+
+  function step(currentTime: number) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const ease = 1 - Math.pow(1 - progress, 3);
+    window.scrollTo(0, startY + diff * ease);
+    if (progress < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
 export default function Home() {
   const [isOpen, setIsOpen] = useState(false);
   const [showNav, setShowNav] = useState(false);
+  const [hasAutoScrolled, setHasAutoScrolled] = useState(false);
+  const [showContent, setShowContent] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => setShowNav(window.scrollY > 400);
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  const handleOpen = useCallback(() => {
+    setIsOpen(true);
+    setTimeout(() => {
+      setShowContent(true);
+      if (!hasAutoScrolled) {
+        setHasAutoScrolled(true);
+        setTimeout(() => {
+          smoothScrollTo(window.innerHeight - 80, 2200);
+        }, 300);
+      }
+    }, 400);
+  }, [hasAutoScrolled]);
 
   const sections = [
     { id: "hero", label: "Home" },
@@ -40,10 +70,10 @@ export default function Home() {
 
   return (
     <>
-      <InvitationModal onOpen={() => setIsOpen(true)} />
+      <InvitationModal onOpen={handleOpen} />
 
       <AnimatePresence>
-        {isOpen && (
+        {showContent && (
           <motion.main
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -69,7 +99,7 @@ export default function Home() {
 
       {/* Floating Navbar */}
       <AnimatePresence>
-        {showNav && isOpen && (
+        {showNav && showContent && (
           <motion.nav
             initial={{ y: -80, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}

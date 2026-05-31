@@ -1,54 +1,100 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+
+function createMelody(ctx: AudioContext) {
+  const pentatonic = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25];
+  const gainNode = ctx.createGain();
+  gainNode.gain.value = 0.08;
+  gainNode.connect(ctx.destination);
+
+  const delay = ctx.createDelay(0.5);
+  delay.delayTime.value = 0.25;
+  const delayGain = ctx.createGain();
+  delayGain.gain.value = 0.3;
+  gainNode.connect(delay);
+  delay.connect(delayGain);
+  delayGain.connect(gainNode);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 800;
+  gainNode.disconnect();
+  gainNode.connect(filter);
+  filter.connect(ctx.destination);
+  filter.connect(delay);
+
+  let noteIndex = 0;
+  let nextTime = ctx.currentTime + 0.5;
+  let stopped = false;
+
+  function scheduleNote() {
+    if (stopped) return;
+    const freq = pentatonic[noteIndex % pentatonic.length];
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+
+    const noteGain = ctx.createGain();
+    noteGain.gain.setValueAtTime(0, nextTime);
+    noteGain.gain.linearRampToValueAtTime(0.08, nextTime + 0.05);
+    noteGain.gain.linearRampToValueAtTime(0.06, nextTime + 0.2);
+    noteGain.gain.linearRampToValueAtTime(0, nextTime + 0.45);
+
+    osc.connect(noteGain);
+    noteGain.connect(filter);
+
+    osc.start(nextTime);
+    osc.stop(nextTime + 0.5);
+
+    noteIndex++;
+    if (noteIndex % 8 === 0) {
+      noteIndex += 2;
+    }
+    nextTime += 0.3 + Math.random() * 0.15;
+    setTimeout(scheduleNote, (nextTime - ctx.currentTime) * 1000);
+  }
+
+  scheduleNote();
+  return () => { stopped = true; };
+}
 
 export default function MusicPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => {
-    audioRef.current = new Audio("/assets/sounds/nasyid.mp3");
-    audioRef.current.loop = true;
-    audioRef.current.volume = 0.3;
-
-    const audio = audioRef.current;
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const onLoadedMetadata = () => setDuration(audio.duration);
-    const onError = () => setHasError(true);
-
-    audio.addEventListener("timeupdate", onTimeUpdate);
-    audio.addEventListener("loadedmetadata", onLoadedMetadata);
-    audio.addEventListener("error", onError);
-
-    return () => {
-      audio.pause();
-      audio.removeEventListener("timeupdate", onTimeUpdate);
-      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
-      audio.removeEventListener("error", onError);
-    };
+  const startMusic = useCallback(() => {
+    if (!ctxRef.current) {
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      ctxRef.current = ctx;
+    }
+    if (ctxRef.current.state === "suspended") {
+      ctxRef.current.resume();
+    }
+    stopRef.current = createMelody(ctxRef.current);
   }, []);
 
-  const [hasError, setHasError] = useState(false);
+  const stopMusic = useCallback(() => {
+    stopRef.current?.();
+    stopRef.current = null;
+  }, []);
 
   const togglePlay = () => {
-    if (!audioRef.current || hasError) return;
     if (isPlaying) {
-      audioRef.current.pause();
+      stopMusic();
+      setIsPlaying(false);
     } else {
-      audioRef.current.play().catch(() => {});
+      startMusic();
+      setIsPlaying(true);
     }
-    setIsPlaying(!isPlaying);
   };
 
-  const formatTime = (t: number) => {
-    const m = Math.floor(t / 60);
-    const s = Math.floor(t % 60);
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
+  useEffect(() => {
+    return () => stopMusic();
+  }, [stopMusic]);
 
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
@@ -74,15 +120,8 @@ export default function MusicPlayer() {
                 </svg>
               </motion.div>
               <div className="flex-1">
-                <div className="h-1.5 bg-gold/10 rounded-full overflow-hidden">
-                  <motion.div
-                    className="h-full gold-bg rounded-full"
-                    style={{ width: duration ? `${(currentTime / duration) * 100}%` : "0%" }}
-                  />
-                </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-dark/40 text-[10px]">{formatTime(currentTime)}</span>
-                  <span className="text-dark/40 text-[10px]">{formatTime(duration)}</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-dark/50 text-xs">Melodi Instrumental</span>
                 </div>
               </div>
             </div>
@@ -91,10 +130,10 @@ export default function MusicPlayer() {
                 onClick={togglePlay}
                 className="flex-1 px-3 py-1.5 gold-bg text-dark text-xs font-medium rounded-lg"
               >
-                {isPlaying ? "⏸ Pause" : "▶ Play"}
+                {isPlaying ? "Pause" : "Play"}
               </button>
               <button
-                onClick={() => { setIsOpen(false); }}
+                onClick={() => setIsOpen(false)}
                 className="px-3 py-1.5 border border-gold/20 text-dark/50 text-xs rounded-lg"
               >
                 Tutup
@@ -104,7 +143,6 @@ export default function MusicPlayer() {
         )}
       </AnimatePresence>
 
-      {/* Floating button */}
       <motion.button
         onClick={togglePlay}
         onDoubleClick={() => setIsOpen(!isOpen)}
